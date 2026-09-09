@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Water Management — Krishi.AI</title>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main">
+    <div class="page-head">
+      <h1><span aria-hidden="true">💧</span> <span data-i18n="tool_water_title">Water Management</span></h1>
+      <p data-i18n="water_intro">Work out how much water your field needs each day and how often to irrigate,
+         based on your crop, soil and the weather.</p>
+    </div>
+
+    <div class="grid grid-2">
+      <form class="card" id="water-form" novalidate>
+        <div class="card-title"><h2 style="margin:0" data-i18n="crop_your_field">Your field</h2></div>
+
+        <div class="grid grid-2">
+          <div class="field">
+            <label for="crop" data-i18n="nav_crop">Crop</label>
+            <select id="crop" name="crop" required disabled><option data-i18n="common_loading">Loading…</option></select>
+          </div>
+          <div class="field">
+            <label for="soil_type" data-i18n="fert_soil_type">Soil type</label>
+            <select id="soil_type" name="soil_type" required disabled><option data-i18n="common_loading">Loading…</option></select>
+          </div>
+          <div class="field">
+            <label for="growth_stage" data-i18n="water_growth_stage">Growth stage</label>
+            <select id="growth_stage" name="growth_stage" required disabled><option data-i18n="common_loading">Loading…</option></select>
+          </div>
+          <div class="field">
+            <label for="area_unit" data-i18n="water_area_unit">Area measured in</label>
+            <select id="area_unit" name="area_unit">
+              <option value="acre" data-i18n="water_acres">Acres</option>
+              <option value="hectare" data-i18n="water_hectares">Hectares</option>
+              <option value="bigha" data-i18n="water_bigha">Bigha</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="area" data-i18n="water_field_size">Field size</label>
+          <input type="number" id="area" name="area" min="0.1" max="500" step="0.1" value="1" required />
+        </div>
+
+        <div class="card-title" style="margin-top:8px"><h3 style="margin:0" data-i18n="water_weather_today">Weather today</h3></div>
+
+        <div class="field">
+          <label for="temperature" data-i18n="crop_temperature">Temperature</label>
+          <div class="range-row">
+            <input type="range" id="temperature" name="temperature" min="10" max="45" step="1"
+                   value="28" data-suffix=" °C" />
+            <output>28 °C</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="humidity" data-i18n="crop_humidity">Humidity</label>
+          <div class="range-row">
+            <input type="range" id="humidity" name="humidity" min="10" max="100" step="1"
+                   value="60" data-suffix=" %" />
+            <output>60 %</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="wind_speed" data-i18n="water_wind">Wind speed</label>
+          <div class="range-row">
+            <input type="range" id="wind_speed" name="wind_speed" min="0" max="8" step="0.5"
+                   value="2" data-suffix=" m/s" />
+            <output>2 m/s</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="sunshine_hours" data-i18n="water_sunshine">Sunshine</label>
+          <div class="range-row">
+            <input type="range" id="sunshine_hours" name="sunshine_hours" min="2" max="14"
+                   step="1" value="8" data-suffix=" hrs" />
+            <output>8 hrs</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="rainfall" data-i18n="water_recent_rain">Recent rainfall</label>
+          <div class="range-row">
+            <input type="range" id="rainfall" name="rainfall" min="0" max="30" step="0.5"
+                   value="2" data-suffix=" mm" />
+            <output>2 mm</output>
+          </div>
+          <span class="hint" data-i18n="water_recent_rain_hint">Rain per day over the last few days</span>
+        </div>
+
+        <button class="btn btn-block" id="submit" type="submit" disabled data-i18n="water_submit">Calculate irrigation</button>
+      </form>
+
+      <div id="result"></div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, ensureSession } from '/js/api.js';
+    import { renderShell, initRanges, readForm, withBusy, fillSelect, showError, showEmpty, escapeHtml, t, tc } from '/js/ui.js';
+    import { mountChatWidget } from '/js/widget.js';
+
+    await renderShell('water');
+    mountChatWidget();
+    initRanges();
+
+    const form = document.getElementById('water-form');
+    const button = document.getElementById('submit');
+    const result = document.getElementById('result');
+
+    showEmpty(result, t('water_empty_title'),
+      t('water_empty_body'), '💧');
+
+    (async () => {
+      try {
+        const options = await api.mlOptions('water');
+        fillSelect(document.getElementById('crop'), options.crop, 'wheat');
+        fillSelect(document.getElementById('soil_type'), options.soil_type, 'loamy');
+        fillSelect(document.getElementById('growth_stage'), options.growth_stage, 'mid');
+        button.disabled = false;
+      } catch (error) {
+        showError(result, error);
+        form.querySelectorAll('select[disabled]').forEach((s) => {
+          s.innerHTML = '<option data-i18n="common_unavailable">Unavailable</option>';
+        });
+      }
+    })();
+
+    const RISK_PILL = { Low: 'pill-ok', Moderate: 'pill-warn', High: 'pill-error' };
+    // A function, not a constant: the labels must follow a language change.
+    const DAYS = () => [t('water_today'),
+      ...[2, 3, 4, 5, 6, 7].map((n) => `${t('water_day')} ${n}`)];
+
+    // "1 acre" not "1 acres". Bigha is the same in both numbers.
+    const area = (size, unit) =>
+      `${size} ${size === 1 ? unit.replace(/s$/, '') : unit}`.toLowerCase();
+
+    const litres = (value) =>
+      value >= 1000 ? `${(value / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} kL`
+                    : `${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} L`;
+
+    function render(data, unit, size) {
+      result.innerHTML = `
+        <div class="result-card">
+          <div class="result-label" data-i18n="water_daily_need">Water needed each day</div>
+          <div class="result-value">${data.water_req_mm_day} mm</div>
+          <div class="metric-row">
+            <div class="metric-box"><div class="metric-val">${litres(data.litres_per_day)}</div>
+              <div class="metric-lbl">${escapeHtml(t('water_per_day'))} · ${escapeHtml(area(size, unit))}</div></div>
+            <div class="metric-box"><div class="metric-val">${litres(data.litres_per_week)}</div>
+              <div class="metric-lbl" data-i18n="water_per_week">Per week</div></div>
+            <div class="metric-box"><div class="metric-val">${data.irrigation_interval_days} ${escapeHtml(t('water_days'))}</div>
+              <div class="metric-lbl" data-i18n="water_every">Irrigate every</div></div>
+          </div>
+          ${data.tip ? `<div class="tip-box">💡 ${escapeHtml(tc(data.tip))}</div>` : ''}
+        </div>
+
+        <section class="card" style="margin-top:16px">
+          <div class="card-title">
+            <h3 style="margin:0" data-i18n="water_stress_risk">Water stress risk</h3>
+            <span class="pill ${RISK_PILL[data.stress_risk] || ''}">${escapeHtml(data.stress_risk)}</span>
+          </div>
+          <p style="margin:0">${escapeHtml(tc(data.risk_note))}</p>
+        </section>
+
+        <section class="card" style="margin-top:16px">
+          <div class="card-title"><h3 style="margin:0" data-i18n="water_next_7">Next 7 days</h3></div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <tbody>
+                ${data.schedule.map((irrigate, i) => `<tr>
+                  <td style="width:90px">${DAYS()[i]}</td>
+                  <td>${irrigate
+                    ? `<span class="pill pill-info">💧 ${escapeHtml(t('water_irrigate'))} — ${litres(data.litres_per_day)}</span>`
+                    : '<span style="color:var(--text-muted)" data-i18n="water_no_irrigation">No irrigation needed</span>'}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          <p class="hint" style="margin-top:12px" data-i18n="water_schedule_hint">Skip a watering if it rains. Check soil
+             moisture by hand before irrigating.</p>
+        </section>`;
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const payload = readForm(form);
+      if (!payload) return;
+      const unitLabel = document.getElementById('area_unit').selectedOptions[0].textContent;
+
+      withBusy(button, t('fert_calculating'), async () => {
+        result.innerHTML = '<div class="card"><div class="skeleton" style="height:160px"></div></div>';
+        try {
+          await ensureSession();
+          render(await api.predict('water', payload), unitLabel, payload.area);
+        } catch (error) {
+          showError(result, error);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

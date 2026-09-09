@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rainfall Forecast — Krishi.AI</title>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main">
+    <div class="page-head">
+      <h1><span aria-hidden="true">🌧️</span> <span data-i18n="tool_rainfall_title">Rainfall Forecast</span></h1>
+      <p data-i18n="rain_intro">See how much rain to expect in your state this month, compared with the
+         long-term IMD average, so you can plan sowing and irrigation.</p>
+    </div>
+
+    <div class="grid grid-2">
+      <form class="card" id="rainfall-form" novalidate>
+        <div class="card-title"><h2 style="margin:0" data-i18n="rain_where_when">Where and when</h2></div>
+
+        <div class="field">
+          <label for="state" data-i18n="rain_state">State</label>
+          <select id="state" name="state" required disabled><option data-i18n="common_loading">Loading…</option></select>
+        </div>
+        <div class="field">
+          <label for="month" data-i18n="rain_month">Month</label>
+          <select id="month" name="month" required disabled><option data-i18n="common_loading">Loading…</option></select>
+          <span class="hint" id="season-hint"></span>
+        </div>
+
+        <div class="card-title" style="margin-top:8px"><h3 style="margin:0" data-i18n="rain_conditions_now">Conditions now</h3></div>
+
+        <div class="field">
+          <label for="temperature" data-i18n="crop_temperature">Temperature</label>
+          <div class="range-row">
+            <input type="range" id="temperature" name="temperature" min="5" max="45" step="1"
+                   value="28" data-suffix=" °C" />
+            <output>28 °C</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="humidity" data-i18n="crop_humidity">Humidity</label>
+          <div class="range-row">
+            <input type="range" id="humidity" name="humidity" min="10" max="100" step="1"
+                   value="65" data-suffix=" %" />
+            <output>65 %</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="prev_month_rain" data-i18n="rain_last_month">Last month's rainfall</label>
+          <input type="number" id="prev_month_rain" name="prev_month_rain" min="0" max="800"
+                 step="1" placeholder="Leave blank to use the IMD average" data-i18n-placeholder="rain_last_month_placeholder" data-i18n-placeholder="rain_last_month_placeholder" />
+          <span class="hint" data-i18n="rain_last_month_hint">In millimetres. Leave blank if you do not know.</span>
+        </div>
+
+        <button class="btn btn-block" id="submit" type="submit" disabled data-i18n="rain_submit">Predict rainfall</button>
+      </form>
+
+      <div id="result"></div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, ensureSession } from '/js/api.js';
+    import { renderShell, initRanges, withBusy, fillSelect, showError, showEmpty, escapeHtml, t, tc } from '/js/ui.js';
+    import { mountChatWidget } from '/js/widget.js';
+
+    await renderShell('rainfall');
+    mountChatWidget();
+    initRanges();
+
+    const form = document.getElementById('rainfall-form');
+    const button = document.getElementById('submit');
+    const result = document.getElementById('result');
+    const stateSelect = document.getElementById('state');
+    const monthSelect = document.getElementById('month');
+    const seasonHint = document.getElementById('season-hint');
+
+    const SEASONS = { 1: 'Winter', 2: 'Winter', 3: 'Pre-Kharif', 4: 'Pre-Kharif',
+                      5: 'Pre-Kharif', 6: 'Kharif', 7: 'Kharif', 8: 'Kharif',
+                      9: 'Kharif', 10: 'Rabi', 11: 'Rabi', 12: 'Rabi' };
+    const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    showEmpty(result, t('rain_empty_title'),
+      t('rain_empty_body'), '🌧️');
+
+    const showSeason = () => {
+      seasonHint.textContent = `Season: ${SEASONS[Number(monthSelect.value)] || ''}`;
+    };
+    monthSelect.addEventListener('change', showSeason);
+
+    (async () => {
+      try {
+        const options = await api.mlOptions('rainfall');
+        fillSelect(stateSelect, options.state);
+        fillSelect(monthSelect, options.month, String(new Date().getMonth() + 1));
+        showSeason();
+        button.disabled = false;
+      } catch (error) {
+        showError(result, error);
+        form.querySelectorAll('select').forEach((s) => { s.innerHTML = '<option data-i18n="common_unavailable">Unavailable</option>'; });
+      }
+    })();
+
+    const CATEGORY = {
+      Deficient: ['pill-error', 'rain_deficient'],
+      Normal:    ['pill-ok',    'rain_normal'],
+      Excess:    ['pill-warn',  'rain_excess'],
+    };
+
+    function render(data, selectedMonth) {
+      const peak = Math.max(...data.monthly_normals, 1);
+      result.innerHTML = `
+        <div class="result-card">
+          <div class="result-label">${escapeHtml(data.state)} — ${escapeHtml(data.month)}</div>
+          <div class="result-value">${data.predicted_mm.toFixed(0)} mm</div>
+          <div class="metric-row">
+            <div class="metric-box"><div class="metric-val">${data.normal_mm.toFixed(0)} mm</div>
+              <div class="metric-lbl" data-i18n="rain_usual">Usual for this month</div></div>
+            <div class="metric-box"><div class="metric-val">${data.departure_pct > 0 ? '+' : ''}${data.departure_pct.toFixed(0)}%</div>
+              <div class="metric-lbl" data-i18n="rain_difference">Difference</div></div>
+            <div class="metric-box"><div class="metric-val" style="font-size:1rem">${escapeHtml(tc(data.season))}</div>
+              <div class="metric-lbl" data-i18n="crop_season">Season</div></div>
+          </div>
+        </div>
+
+        <section class="card" style="margin-top:16px">
+          <div class="card-title">
+            <h3 style="margin:0" data-i18n="rain_meaning">What this means for your farm</h3>
+            <span class="pill ${(CATEGORY[data.category] || [])[0] || ''}">${
+              escapeHtml(CATEGORY[data.category] ? t(CATEGORY[data.category][1]) : data.category)}</span>
+          </div>
+          <p style="margin:0">${escapeHtml(tc(data.advice))}</p>
+        </section>
+
+        <section class="card" style="margin-top:16px">
+          <div class="card-title"><h3 style="margin:0">${escapeHtml(t('rain_year_pattern'))} — ${escapeHtml(data.state)}</h3></div>
+          ${data.monthly_normals.map((mm, i) => {
+            const isCurrent = i + 1 === selectedMonth;
+            return `<div class="bar-row">
+              <div class="bar-head">
+                <span${isCurrent ? ' style="font-weight:800;color:var(--accent)"' : ''}>${MONTHS_SHORT[i]}</span>
+                <span>${mm.toFixed(0)} mm</span>
+              </div>
+              <div class="bar-track"><div class="bar-fill" style="width:${(mm / peak * 100).toFixed(1)}%${
+                isCurrent ? ';background:linear-gradient(90deg,var(--amber-600),var(--amber-500))' : ''}"></div></div>
+            </div>`;
+          }).join('')}
+          <p class="hint" data-i18n="rain_imd_note">Based on India Meteorological Department historical normals.
+             Your month is highlighted.</p>
+        </section>`;
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+
+      const month = Number(monthSelect.value);
+      const prev = document.getElementById('prev_month_rain').value.trim();
+      const payload = {
+        state: stateSelect.value,
+        month,
+        temperature: Number(document.getElementById('temperature').value),
+        humidity: Number(document.getElementById('humidity').value),
+        // Omitted entirely when blank, so the model falls back to the IMD normal.
+        ...(prev === '' ? {} : { prev_month_rain: Number(prev) }),
+      };
+
+      withBusy(button, t('rain_predicting'), async () => {
+        result.innerHTML = '<div class="card"><div class="skeleton" style="height:160px"></div></div>';
+        try {
+          await ensureSession();
+          render(await api.predict('rainfall', payload), month);
+        } catch (error) {
+          showError(result, error);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

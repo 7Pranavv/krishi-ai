@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Page not found — Krishi.AI</title>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <main class="page" id="main">
+    <div class="card">
+      <div class="state">
+        <div class="state-icon" aria-hidden="true">🌾</div>
+        <h1 data-i18n="notfound_heading">This page does not exist</h1>
+        <p data-i18n="notfound_body">The link may be old or mistyped. Everything Krishi.AI can do is on the home page.</p>
+        <a class="btn" href="/" data-i18n="notfound_home">Go to the home page</a>
+      </div>
+    </div>
+
+    <h2 style="margin-top:32px" data-i18n="notfound_jump">Or jump straight to a tool</h2>
+    <div class="grid grid-3" id="tool-grid"></div>
+  </main>
+
+  <script type="module">
+    import { renderShell, TOOLS, escapeHtml } from '/js/ui.js';
+
+    await renderShell('');
+    const renderTools = () => {
+      document.getElementById('tool-grid').innerHTML = TOOLS.map((tool) => `
+      <a class="card tool-card" href="${tool.href}">
+        <span class="tool-icon" aria-hidden="true">${tool.icon}</span>
+        <h3>${escapeHtml(tool.title)}</h3>
+        <p>${escapeHtml(tool.blurb)}</p>
+      </a>`).join('');
+    };
+    renderTools();
+    document.addEventListener('krishi:language', renderTools);
+  </script>
+</body>
+</html>

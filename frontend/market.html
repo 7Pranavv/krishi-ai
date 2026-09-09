@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Market Prices — Krishi.AI</title>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main">
+    <div class="page-head">
+      <h1><span aria-hidden="true">🧺</span> <span data-i18n="tool_market_title">Market Prices</span></h1>
+      <p data-i18n="market_intro">Prices reported by mandis to the Government of India. Use them to decide
+         when and where to sell.</p>
+    </div>
+
+    <div id="availability"></div>
+
+    <section class="card">
+      <div class="card-title"><h2 style="margin:0" data-i18n="market_find">Find a price</h2></div>
+      <form id="price-form" novalidate>
+        <div class="grid grid-3">
+          <!-- Typeable rather than a fixed list: the feed carries hundreds of
+               commodities but only returns a sample per request, so a strict
+               dropdown would hide most crops from the farmer. -->
+          <div class="field">
+            <label for="commodity" data-i18n="nav_crop">Crop</label>
+            <input type="text" id="commodity" name="commodity" list="commodity-list"
+                   placeholder="e.g. Wheat" autocomplete="off" disabled />
+            <datalist id="commodity-list"></datalist>
+            <span class="hint" data-i18n="market_crop_hint">Type a crop name, or leave blank for all</span>
+          </div>
+          <div class="field">
+            <label for="state" data-i18n="rain_state">State</label>
+            <input type="text" id="state" name="state" list="state-list"
+                   placeholder="e.g. Punjab" autocomplete="off" disabled />
+            <datalist id="state-list"></datalist>
+            <span class="hint" data-i18n="market_state_hint">Leave blank for all states</span>
+          </div>
+          <div class="field" style="justify-content:flex-end">
+            <button class="btn btn-block" id="search" type="submit" disabled data-i18n="market_show">Show prices</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <div id="prices" style="margin-top:24px"></div>
+
+    <section class="card" style="margin-top:24px">
+      <div class="card-title"><h2 style="margin:0" data-i18n="market_harvest_q">What is my harvest worth?</h2></div>
+      <p class="hint" style="margin-top:-8px" data-i18n="market_harvest_hint">Uses the reported price for the crop and
+         state you chose above, together with your own expected yield.</p>
+      <form id="value-form" novalidate>
+        <div class="grid grid-3">
+          <div class="field">
+            <label for="yield_tonnes_per_hectare" data-i18n="fert_expected_yield">Expected yield</label>
+            <input type="number" id="yield_tonnes_per_hectare" name="yield_tonnes_per_hectare"
+                   min="0.1" max="200" step="0.1" value="3" required />
+            <span class="hint" data-i18n="fert_tonnes_per_ha">tonnes per hectare</span>
+          </div>
+          <div class="field">
+            <label for="area_hectares" data-i18n="water_field_size">Field size</label>
+            <input type="number" id="area_hectares" name="area_hectares"
+                   min="0.1" max="500" step="0.1" value="1" required />
+            <span class="hint" data-i18n="market_hectares">hectares</span>
+          </div>
+          <div class="field" style="justify-content:flex-end">
+            <button class="btn btn-block" id="calc" type="submit" disabled data-i18n="market_calc">Work it out</button>
+          </div>
+        </div>
+      </form>
+      <div id="value-result" style="margin-top:16px"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api, ensureSession } from '/js/api.js';
+    import { renderShell, readForm, withBusy, showError, showEmpty,
+             escapeHtml , t } from '/js/ui.js';
+    import { mountChatWidget } from '/js/widget.js';
+
+    await renderShell('market');
+    mountChatWidget();
+
+    const priceForm = document.getElementById('price-form');
+    const valueForm = document.getElementById('value-form');
+    const commoditySel = document.getElementById('commodity');
+    const stateSel = document.getElementById('state');
+    const searchBtn = document.getElementById('search');
+    const calcBtn = document.getElementById('calc');
+    const prices = document.getElementById('prices');
+    const valueResult = document.getElementById('value-result');
+
+    showEmpty(prices, t('market_empty_title'),
+      'Choose a crop and state, then tap "Show prices".', '🧺');
+
+    const rupees = (n) =>
+      '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+
+    function fillSuggestions(listId, values) {
+      document.getElementById(listId).innerHTML =
+        values.map((v) => `<option value="${escapeHtml(v)}"></option>`).join('');
+    }
+
+    function markUnavailable(message) {
+      document.getElementById('availability').innerHTML = `
+        <div class="alert alert-warning" role="alert" style="margin-bottom:24px">
+          <span aria-hidden="true">⏳</span>
+          <div>
+            <strong>${escapeHtml(message)}</strong>
+            <span data-i18n="market_unavailable_body">A free data.gov.in API key is needed on the server. Everything
+                  else in Krishi.AI works normally.</span>
+          </div>
+        </div>`;
+      [commoditySel, stateSel].forEach((el) => {
+        el.disabled = true;
+        el.placeholder = t('common_unavailable');
+      });
+      showEmpty(prices, t('market_not_ready_title'),
+        t('market_not_ready_body'), '🧺');
+    }
+
+    // Check availability before fetching options, so an unconfigured server
+    // says so once rather than reporting the same thing twice.
+    (async () => {
+      try {
+        await ensureSession();
+        const health = await api.health();
+        if (health.market && !health.market.ready) {
+          markUnavailable(t('market_unavailable_title'));
+          return;
+        }
+        // Suggestions only - the field stays typeable so any crop can be
+        // searched, not just the ones in this sample of the feed.
+        const options = await api.marketOptions();
+        fillSuggestions('commodity-list', options.commodities);
+        fillSuggestions('state-list', options.states);
+        commoditySel.disabled = false;
+        stateSel.disabled = false;
+        searchBtn.disabled = false;
+        calcBtn.disabled = false;
+      } catch (error) {
+        if (error.status === 503) markUnavailable(error.message);
+        else showError(prices, error);
+      }
+    })();
+
+    function renderPrices(data) {
+      if (!data.count) {
+        showEmpty(prices, t('market_none_title'),
+          'No mandi has reported this crop recently. Try another state, or check ' +
+          'back after the next market day.', '📭');
+        return;
+      }
+      const rows = data.records.slice(0, 60);
+      prices.innerHTML = `
+        <section class="card">
+          <div class="card-title">
+            <h2 style="margin:0">${data.count} ${escapeHtml(t('market_reported'))}</h2>
+            <span class="spacer"></span>
+            <span class="pill pill-info">${escapeHtml(data.source)}</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="nav_crop">Crop</th><th data-i18n="market_col_market">Market</th><th>${escapeHtml(t('market_col_state'))}</th>
+                <th style="text-align:right" data-i18n="market_col_min">Min</th>
+                <th style="text-align:right" data-i18n="market_col_modal">Modal</th>
+                <th style="text-align:right" data-i18n="market_col_max">Max</th>
+                <th data-i18n="market_col_date">Reported</th>
+              </tr></thead>
+              <tbody>${rows.map((r) => `<tr>
+                <td>${escapeHtml(r.commodity || '')}${
+                  r.variety ? `<br><span class="hint">${escapeHtml(r.variety)}</span>` : ''}</td>
+                <td>${escapeHtml(r.market || '')}</td>
+                <td>${escapeHtml(r.state || '')}</td>
+                <td style="text-align:right">${r.min_price ? rupees(r.min_price) : '—'}</td>
+                <td style="text-align:right;font-weight:700">${rupees(r.modal_price)}</td>
+                <td style="text-align:right">${r.max_price ? rupees(r.max_price) : '—'}</td>
+                <td style="white-space:nowrap">${escapeHtml(r.arrival_date || '')}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </div>
+          <p class="hint" style="margin-top:12px" data-i18n="market_quintal_note">All figures are rupees per quintal
+             (100 kg), as reported by the mandi on the date shown. A dash means that
+             mandi did not report that figure.</p>
+        </section>`;
+    }
+
+    priceForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      withBusy(searchBtn, t('common_loading'), async () => {
+        prices.innerHTML = '<div class="card"><div class="skeleton" style="height:180px"></div></div>';
+        try {
+          renderPrices(await api.marketPrices(
+            commoditySel.value.trim(), stateSel.value.trim()));
+        } catch (error) {
+          showError(prices, error);
+        }
+      });
+    });
+
+    valueForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!commoditySel.value.trim()) {
+        showError(valueResult, { message: t('market_choose_crop_first') });
+        return;
+      }
+      const payload = readForm(valueForm);
+      if (!payload) return;
+      payload.commodity = commoditySel.value.trim();
+      payload.state = stateSel.value.trim() || null;
+
+      withBusy(calcBtn, t('market_calculating'), async () => {
+        valueResult.innerHTML = '<div class="skeleton" style="height:120px"></div>';
+        try {
+          const d = await api.harvestValue(payload);
+          valueResult.innerHTML = `
+            <div class="result-card">
+              <div class="result-label" data-i18n="market_gross">Gross value of your harvest</div>
+              <div class="result-value">${rupees(d.gross_value)}</div>
+              <div class="metric-row">
+                <div class="metric-box"><div class="metric-val">${d.quintals.toLocaleString('en-IN')}</div>
+                  <div class="metric-lbl" data-i18n="market_quintals">Quintals</div></div>
+                <div class="metric-box"><div class="metric-val">${rupees(d.price_per_quintal)}</div>
+                  <div class="metric-lbl" data-i18n="market_per_quintal">Per quintal</div></div>
+                <div class="metric-box"><div class="metric-val">${d.markets_compared}</div>
+                  <div class="metric-lbl" data-i18n="market_mandis_compared">Mandis compared</div></div>
+              </div>
+              <div class="tip-box">${escapeHtml(d.basis)}</div>
+            </div>
+            <div class="alert ${d.wide_spread ? 'alert-warning' : 'alert-info'}" style="margin-top:16px">
+              <span aria-hidden="true">${d.wide_spread ? '⚠️' : 'ℹ️'}</span>
+              <div>
+                <strong>${d.wide_spread
+                  ? t('market_wide_title')
+                  : `Based on the median of ${d.markets_compared} reported mandi price${
+                      d.markets_compared === 1 ? '' : 's'}.`}</strong>
+                <span>${d.wide_spread
+                  ? `Reported rates run from ${rupees(d.price_range.min)} to ${rupees(d.price_range.max)}
+                     per quintal across ${d.markets_compared} mandis, so what you actually get
+                     depends on your variety, grade and local market. Check your own mandi's rate
+                     before deciding.`
+                  : `Range ${rupees(d.price_range.min)}–${rupees(d.price_range.max)} per quintal.`}
+                  Reference market: ${escapeHtml(d.market || 'n/a')}${
+                    d.arrival_date ? `, reported ${escapeHtml(d.arrival_date)}` : ''}.
+                  ${d.wide_spread ? '' : 'Prices move between market days.'}</span>
+                ${!d.state ? '<span data-i18n="market_state_tip">Tip: enter your state above for a closer figure.</span>' : ''}
+              </div>
+            </div>`;
+        } catch (error) {
+          showError(valueResult, error);
+        }
+      });
+    });
+
+  </script>
+</body>
+</html>

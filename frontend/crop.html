@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Crop Recommendation — Krishi.AI</title>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main">
+    <div class="page-head">
+      <h1><span aria-hidden="true">🌾</span> <span data-i18n="tool_crop_title">Crop Recommendation</span></h1>
+      <p data-i18n="crop_intro">Enter your soil test values and the local weather. Krishi.AI suggests the crop
+         best suited to those conditions.</p>
+    </div>
+
+    <div class="grid grid-2">
+      <form class="card" id="crop-form" novalidate>
+        <div class="card-title"><h2 style="margin:0" data-i18n="crop_your_field">Your field</h2></div>
+
+        <div class="grid grid-3">
+          <div class="field">
+            <label for="N" data-i18n="crop_nitrogen">Nitrogen (N)</label>
+            <input type="number" id="N" name="N" min="0" max="140" step="1" value="80" required />
+            <span class="hint">kg/ha · 0–140</span>
+          </div>
+          <div class="field">
+            <label for="P" data-i18n="crop_phosphorus">Phosphorus (P)</label>
+            <input type="number" id="P" name="P" min="5" max="145" step="1" value="40" required />
+            <span class="hint">kg/ha · 5–145</span>
+          </div>
+          <div class="field">
+            <label for="K" data-i18n="crop_potassium">Potassium (K)</label>
+            <input type="number" id="K" name="K" min="5" max="205" step="1" value="40" required />
+            <span class="hint">kg/ha · 5–205</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="temperature" data-i18n="crop_temperature">Temperature</label>
+          <div class="range-row">
+            <input type="range" id="temperature" name="temperature" min="8" max="44" step="0.1"
+                   value="23" data-suffix=" °C" />
+            <output>23 °C</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="humidity" data-i18n="crop_humidity">Humidity</label>
+          <div class="range-row">
+            <input type="range" id="humidity" name="humidity" min="14" max="100" step="0.1"
+                   value="82" data-suffix=" %" />
+            <output>82 %</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="ph" data-i18n="crop_ph">Soil pH</label>
+          <div class="range-row">
+            <input type="range" id="ph" name="ph" min="3.5" max="10" step="0.1" value="6.4" />
+            <output>6.4</output>
+          </div>
+          <span class="hint" data-i18n="crop_ph_hint">Below 7 is acidic · 7 is neutral · above 7 is alkaline</span>
+        </div>
+        <div class="field">
+          <label for="rainfall" data-i18n="nav_rainfall">Rainfall</label>
+          <div class="range-row">
+            <input type="range" id="rainfall" name="rainfall" min="20" max="300" step="1"
+                   value="200" data-suffix=" mm" />
+            <output>200 mm</output>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="state"><span data-i18n="crop_your_state">Your state</span>
+            <span class="hint">(<span data-i18n="common_optional">optional</span>)</span></label>
+          <select id="state"><option value="" data-i18n="crop_state_none">Not specified</option></select>
+          <span class="hint" data-i18n="crop_state_hint">Only used to work out your cropping season — the monsoon
+             reaches the south and east earlier than the north.</span>
+        </div>
+
+        <button class="btn btn-block" id="submit" type="submit" data-i18n="crop_submit">Get recommendation</button>
+      </form>
+
+      <div class="stack">
+        <div id="result"></div>
+        <section class="card">
+          <div class="card-title"><h3 style="margin:0" data-i18n="crop_numbers_mean">What these numbers mean</h3></div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <tbody>
+                <tr><td><strong>N</strong></td><td data-i18n="crop_n_means">Nitrogen — drives leaf and stem growth</td></tr>
+                <tr><td><strong>P</strong></td><td data-i18n="crop_p_means">Phosphorus — supports roots and flowering</td></tr>
+                <tr><td><strong>K</strong></td><td data-i18n="crop_k_means">Potassium — improves disease resistance</td></tr>
+                <tr><td><strong>pH</strong></td><td data-i18n="crop_ph_means">How acidic or alkaline your soil is</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="hint" style="margin-top:12px" data-i18n="crop_kvk_hint">Your local Krishi Vigyan Kendra can test your soil
+             and give you these values.</p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, ensureSession } from '/js/api.js';
+    import { renderShell, initRanges, readForm, withBusy, showError, showEmpty, escapeHtml, t, tc } from '/js/ui.js';
+    import { mountChatWidget } from '/js/widget.js';
+
+    await renderShell('crop');
+    mountChatWidget();
+    initRanges();
+
+    const form = document.getElementById('crop-form');
+    const button = document.getElementById('submit');
+    const result = document.getElementById('result');
+
+    // The season calendar covers the same states the rainfall model knows,
+    // so the list comes from there rather than being hardcoded twice.
+    (async () => {
+      try {
+        const options = await api.mlOptions('rainfall');
+        const select = document.getElementById('state');
+        select.insertAdjacentHTML('beforeend', options.state.values
+          .map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join(''));
+      } catch {
+        /* Optional field - a missing list just means no season panel. */
+      }
+    })();
+
+    showEmpty(result, t('crop_empty_title'),
+      t('crop_empty_body'), '🌾');
+
+    function render(data) {
+      const bars = (data.top_predictions || []).map((c) => `
+        <div class="bar-row">
+          <div class="bar-head">
+            <span>${escapeHtml(c.emoji || '🌿')} ${escapeHtml(c.crop)}</span>
+            <span>${(c.probability * 100).toFixed(1)}%</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.min(c.probability * 100, 100).toFixed(1)}%"></div></div>
+        </div>`).join('');
+
+      const season = data.current_season;
+      // Scale the driver bars against the strongest one, so the relative
+      // weight is readable whatever the absolute SHAP values happen to be.
+      const maxImpact = Math.max(
+        ...(data.drivers || []).map((d) => Math.abs(d.impact)), 1e-9);
+
+      const FIT = {
+        highly_suitable: ['pill-ok', t('crop_fit_high')],
+        suitable: ['pill-info', t('crop_fit_ok')],
+        not_suitable: ['pill-warn', t('crop_fit_low')],
+      };
+      const fit = FIT[data.season_fit];
+      const fitPill = fit
+        ? `<span class="pill ${fit[0]}">${fit[1]}</span>`
+        : '';
+
+      result.innerHTML = `
+        ${data.low_confidence ? `<div class="alert alert-warning" role="alert" style="margin-bottom:16px">
+            <span aria-hidden="true">⚠️</span>
+            <div><strong data-i18n="crop_low_confidence_title">The model is not confident about this one.</strong>
+            <span data-i18n="crop_low_confidence_body">Double-check your soil values, and treat the suggestion as a starting point.</span></div>
+          </div>` : ''}
+        <div class="result-card">
+          <div class="result-label" data-i18n="crop_recommended">Recommended crop</div>
+          <div class="result-value">${escapeHtml(data.emoji || '🌿')} ${escapeHtml(data.crop.toUpperCase())}</div>
+          <div class="metric-row">
+            <div class="metric-box">
+              <div class="metric-val">${(data.confidence * 100).toFixed(0)}%</div>
+              <div class="metric-lbl" data-i18n="crop_confidence">Confidence</div>
+            </div>
+            ${data.season ? `<div class="metric-box">
+              <div class="metric-val" style="font-size:1rem">${escapeHtml(tc(data.season))}</div>
+              <div class="metric-lbl" data-i18n="crop_season">Season</div></div>` : ''}
+          </div>
+          ${data.tip ? `<div class="tip-box">💡 ${escapeHtml(tc(data.tip))}</div>` : ''}
+        </div>
+        ${data.drivers && data.drivers.length ? `<section class="card" style="margin-top:16px">
+            <div class="card-title"><h3 style="margin:0" data-i18n="crop_why">Why this crop</h3></div>
+            <p class="hint" style="margin-top:-8px" data-i18n="crop_why_hint">The values that mattered most,
+               strongest first.</p>
+            ${data.drivers.map((d) => {
+              const strength = Math.min(Math.abs(d.impact) / maxImpact * 100, 100);
+              const against = d.direction !== t('crop_supports');
+              return `<div class="bar-row">
+                <div class="bar-head">
+                  <span>${escapeHtml(d.label)} — <strong>${d.value}${
+                    d.unit ? ' ' + escapeHtml(d.unit) : ''}</strong></span>
+                  <span class="pill ${against ? 'pill-warn' : 'pill-ok'}">${
+                    against ? t('crop_counts_against') : t('crop_supports')}</span>
+                </div>
+                <div class="bar-track"><div class="bar-fill" style="width:${strength.toFixed(0)}%${
+                  against ? ';background:linear-gradient(90deg,var(--amber-600),var(--amber-500))' : ''
+                }"></div></div>
+              </div>`;
+            }).join('')}
+          </section>` : ''}
+
+        ${season ? `<section class="card" style="margin-top:16px">
+            <div class="card-title">
+              <h3 style="margin:0" data-i18n="crop_season_now">Season right now</h3>
+              ${fitPill}
+            </div>
+            <p style="margin:0 0 8px"><strong>${escapeHtml(tc(season.season_label))}</strong>
+               in ${escapeHtml(tc(season.region_label))} — ${escapeHtml(tc(season.note))}</p>
+            <p style="margin:0 0 4px"><strong>${escapeHtml(t('crop_season_typical'))}</strong></p>
+            <p class="hint" style="margin:0">${escapeHtml(
+              (season.crops.highly_suitable || []).slice(0, 8).join(', '))}.
+              ${escapeHtml(t('crop_season_typical_hint'))}</p>
+          </section>` : ''}
+
+        <section class="card" style="margin-top:16px">
+          <div class="card-title"><h3 style="margin:0" data-i18n="crop_other_matches">Other good matches</h3></div>
+          ${bars}
+        </section>`;
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const payload = readForm(form);
+      if (!payload) return;
+
+      withBusy(button, t('crop_checking'), async () => {
+        result.innerHTML = '<div class="card"><div class="skeleton" style="height:150px"></div></div>';
+        try {
+          await ensureSession();
+          render(await api.predict('crop', payload,
+                                   { state: document.getElementById('state').value }));
+        } catch (error) {
+          showError(result, error);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ask AI — Krishi.AI</title>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#chat-input">Skip to the message box</a>
+
+  <div class="chat-shell" id="main">
+    <aside class="chat-sidebar">
+      <button class="btn btn-block" id="new-chat" type="button" data-i18n="chat_new">New chat</button>
+      <label class="sr-only" for="chat-search" data-i18n="chat_search">Search chats</label>
+      <input type="search" id="chat-search" placeholder="Search chats" data-i18n-placeholder="chat_search" data-i18n-placeholder="chat_search" />
+      <div class="conversation-list" id="conversation-list" aria-label="Your conversations"></div>
+    </aside>
+
+    <section class="chat-main">
+      <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="Conversation"></div>
+      <div class="chat-composer">
+        <label class="sr-only" for="chat-input" data-i18n="chat_your_question">Your question</label>
+        <textarea id="chat-input" rows="1" data-i18n-placeholder="assistant_prompt"
+                  placeholder="Ask about farming, weather, market prices..."></textarea>
+        <button class="btn" id="chat-send" type="button" data-i18n="chat_send">Send</button>
+      </div>
+    </section>
+  </div>
+
+  <script type="module">
+    import { api, ensureSession } from '/js/api.js';
+    import { renderShell, escapeHtml, formatDate, showError , t } from '/js/ui.js';
+    import { createChat } from '/js/chat-core.js';
+
+    await renderShell('chat');
+
+    const log = document.getElementById('chat-log');
+    const list = document.getElementById('conversation-list');
+    const search = document.getElementById('chat-search');
+
+    const SUGGESTIONS = [
+      t('chat_suggest_1'),
+      t('chat_suggest_2'),
+      t('chat_suggest_3'),
+      t('chat_suggest_4'),
+    ];
+
+    // data-welcome marks these nodes so the chat controller can clear them
+    // as soon as the first message is sent, however it was triggered.
+    function showWelcome() {
+      log.innerHTML = `<div class="state" style="padding-top:8vh" data-welcome>
+        <div class="state-icon" aria-hidden="true">🌱</div>
+        <h3>${escapeHtml(t('welcome_message'))}</h3>
+        <p data-i18n="chat_ask_any_language">Ask in any Indian language. Krishi.AI answers in the same language.</p>
+      </div>
+      <div class="suggestion-grid" style="margin-top:16px" data-welcome>
+        ${SUGGESTIONS.map((s) => `<button class="suggestion" type="button" data-q="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}
+      </div>`;
+    }
+
+    const chat = createChat({
+      log,
+      input: document.getElementById('chat-input'),
+      sendButton: document.getElementById('chat-send'),
+      onSession: (id) => {
+        if (id) {
+          history.replaceState(null, '', `/chat?session=${encodeURIComponent(id)}`);
+          loadConversations();
+        } else {
+          history.replaceState(null, '', '/chat');
+        }
+      },
+    });
+
+    log.addEventListener('click', (event) => {
+      const button = event.target.closest('.suggestion');
+      if (!button) return;
+      chat.send(button.dataset.q);
+    });
+
+    let conversations = [];
+
+    function renderConversations() {
+      const term = search.value.trim().toLowerCase();
+      const shown = term
+        ? conversations.filter((c) => (c.title || '').toLowerCase().includes(term))
+        : conversations;
+      if (!shown.length) {
+        list.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem;padding:8px">
+          ${conversations.length ? t('chat_no_match') : t('chat_your_chats')}</p>`;
+        return;
+      }
+      list.innerHTML = shown.map((c) => `<button class="conversation-item" type="button"
+          data-session="${escapeHtml(c.session_id)}"
+          ${c.session_id === chat.sessionId ? 'aria-current="true"' : ''}
+          title="${escapeHtml(formatDate(c.updated_at))}">${escapeHtml(c.title || t('chat_untitled'))}</button>`).join('');
+    }
+
+    async function loadConversations() {
+      try {
+        conversations = await api.conversations();
+        renderConversations();
+      } catch (error) {
+        showError(list, error);
+      }
+    }
+
+    list.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-session]');
+      if (button) chat.load(button.dataset.session).then(renderConversations);
+    });
+    search.addEventListener('input', renderConversations);
+
+    document.getElementById('new-chat').addEventListener('click', () => {
+      chat.reset();
+      showWelcome();
+      renderConversations();
+      document.getElementById('chat-input').focus();
+    });
+
+    // Only the untouched welcome screen is safe to rebuild - re-rendering an
+    // active conversation would wipe it.
+    document.addEventListener('krishi:language', () => {
+      if (!chat.sessionId) showWelcome();
+    });
+
+    (async () => {
+      showWelcome();
+      try {
+        await ensureSession();
+        await loadConversations();
+        const wanted = new URLSearchParams(location.search).get('session');
+        if (wanted) {
+          await chat.load(wanted);
+          renderConversations();
+        }
+      } catch (error) {
+        showError(list, error);
+      }
+    })();
+  </script>
+</body>
+</html>

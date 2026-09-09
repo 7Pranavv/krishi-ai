@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Krishi.AI — Your farming assistant</title>
+  <meta name="description" content="Krishi.AI: an AI-powered digital assistant for farmers. Crop advice, disease detection, fertilizer plans, irrigation and rainfall — in one place." />
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main">
+    <section class="hero">
+      <span class="badge" data-i18n="home_badge">AI for farmers</span>
+      <h1>Krishi.AI</h1>
+      <p data-i18n="welcome_message">Welcome! How can I assist you today?</p>
+    </section>
+
+    <h2 data-i18n="home_tools">Your tools</h2>
+    <div class="grid grid-3" id="tool-grid"></div>
+
+    <div class="grid grid-2" style="margin-top:32px">
+      <section class="card">
+        <div class="card-title"><h2 style="margin:0" data-i18n="home_recent_activity">Recent activity</h2></div>
+        <div id="recent-predictions"></div>
+      </section>
+      <section class="card">
+        <div class="card-title"><h2 style="margin:0" data-i18n="home_recent_chats">Recent chats</h2></div>
+        <div id="recent-chats"></div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:32px">
+      <div class="card-title"><h2 style="margin:0" data-i18n="home_service_status">Service status</h2></div>
+      <div id="service-status"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api, ensureSession, ApiError } from '/js/api.js';
+    import { renderShell, TOOLS, escapeHtml, formatDate, showError, stateMarkup , t } from '/js/ui.js';
+    import { mountChatWidget } from '/js/widget.js';
+
+    await renderShell('home');
+    mountChatWidget();
+
+    const grid = document.getElementById('tool-grid');
+
+    // Tools render immediately so the page is useful before the API answers.
+    // A tool that is down is flagged but still reachable - its own page
+    // explains the problem better than a dead card would.
+    function renderTools(availability = {}) {
+      grid.innerHTML = TOOLS.map((tool) => `
+        <a class="card tool-card" href="${tool.href}">
+          <span class="tool-icon" aria-hidden="true">${tool.icon}</span>
+          <h3>${escapeHtml(tool.title)}</h3>
+          <p>${escapeHtml(tool.blurb)}</p>
+          ${availability[tool.id] === false
+            ? `<span class="pill pill-warn">${tool.id === 'chat'
+                ? 'Saved answers only' : t('home_temporarily_unavailable')}</span>` : ''}
+        </a>`).join('');
+    }
+    renderTools();
+    // Cards are built in JS, so they need rebuilding on a language change.
+    let lastAvailability = {};
+    document.addEventListener('krishi:language', () => renderTools(lastAvailability));
+
+    const recentPredictions = document.getElementById('recent-predictions');
+    const recentChats = document.getElementById('recent-chats');
+    const statusBox = document.getElementById('service-status');
+    recentPredictions.innerHTML = '<div class="skeleton" style="height:64px"></div>';
+    recentChats.innerHTML = '<div class="skeleton" style="height:64px"></div>';
+    statusBox.innerHTML = '<div class="skeleton" style="height:40px"></div>';
+
+    const TOOL_NAMES = Object.fromEntries(TOOLS.map((t) => [t.id, t.title]));
+
+    function renderStatus(services) {
+      const models = services.ml?.models || {};
+      const rows = [
+        [t('home_ai_assistant'), services.assistant?.ready, 'Set GEMINI_API_KEY on the server to enable it.'],
+        ...TOOLS.filter((t) => t.id !== 'chat').map((t) => [
+          t.title, models[t.id]?.ready, models[t.id]?.error,
+        ]),
+      ];
+      statusBox.innerHTML = `<div class="table-scroll"><table class="data-table">
+        <thead><tr><th data-i18n="home_status_feature">Feature</th><th data-i18n="home_status_state">Status</th><th data-i18n="home_status_note">Note</th></tr></thead>
+        <tbody>${rows.map(([name, ready, note]) => `<tr>
+          <td>${escapeHtml(name)}</td>
+          <td><span class="pill ${ready ? 'pill-ok' : 'pill-warn'}">${ready ? t('home_status_working') : t('common_unavailable')}</span></td>
+          <td style="color:var(--text-muted);font-size:.82rem">${ready ? '' : escapeHtml(note || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+    }
+
+    (async () => {
+      try {
+        await ensureSession();
+        const data = await api.dashboard();
+
+        const models = data.services.ml?.models || {};
+        lastAvailability = {
+          chat: data.services.assistant?.ready !== false,
+          crop: models.crop?.ready, disease: models.disease?.ready,
+          fertilizer: models.fertilizer?.ready, water: models.water?.ready,
+          rainfall: models.rainfall?.ready,
+          market: data.services.market?.ready,
+        };
+        renderTools(lastAvailability);
+        renderStatus(data.services);
+
+        recentPredictions.innerHTML = data.recent_predictions.length
+          ? data.recent_predictions.map((p) => `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+              <div class="row" style="gap:8px">
+                <span class="pill pill-info">${escapeHtml(TOOL_NAMES[p.tool] || p.tool)}</span>
+                <span style="color:var(--text-muted);font-size:.78rem">${escapeHtml(formatDate(p.created_at))}</span>
+              </div>
+              <div style="font-size:.92rem;margin-top:4px">${escapeHtml(p.summary)}</div>
+            </div>`).join('')
+          : stateMarkup({ icon: '🌱', title: 'Nothing yet',
+              body: t('home_no_activity_body') });
+
+        recentChats.innerHTML = data.recent_conversations.length
+          ? data.recent_conversations.map((c) => `<a href="/chat?session=${encodeURIComponent(c.session_id)}"
+              style="display:block;padding:10px 0;border-bottom:1px solid var(--border);text-decoration:none;color:inherit">
+              <div style="font-size:.92rem">${escapeHtml(c.title || t('chat_untitled'))}</div>
+              <div style="color:var(--text-muted);font-size:.78rem">${c.message_count} messages · ${escapeHtml(formatDate(c.updated_at))}</div>
+            </a>`).join('')
+          : stateMarkup({ icon: '💬', title: 'No chats yet',
+              body: t('home_no_chats_body') });
+      } catch (error) {
+        // The tool grid stays usable even if the dashboard call fails.
+        showError(recentPredictions, error);
+        recentChats.innerHTML = '';
+        statusBox.innerHTML = '';
+      }
+    })();
+  </script>
+</body>
+</html>

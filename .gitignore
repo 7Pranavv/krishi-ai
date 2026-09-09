@@ -1,0 +1,36 @@
+# Secrets - never commit
+.env
+*.env
+!.env.example
+
+# Local database
+*.db
+*.sqlite3
+
+# Virtual environments
+.venv*/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# The trained plant-disease weights are large and distributed separately.
+# See docs/plant-disease-model.md
+ml-service/artifacts/disease/*.h5
+ml-service/artifacts/disease/*.keras
+
+# Backups written by the training scripts when they overwrite a model
+*.pkl.bak
+
+# Scratch
+tools/_*.py
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

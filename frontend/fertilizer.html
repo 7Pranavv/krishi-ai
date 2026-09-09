@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fertilizer Plan — Krishi.AI</title>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main">
+    <div class="page-head">
+      <h1><span aria-hidden="true">🧪</span> <span data-i18n="tool_fertilizer_title">Fertilizer Plan</span></h1>
+      <p data-i18n="fert_intro">Enter your soil test report and crop. Krishi.AI works out how much nitrogen,
+         phosphorus and potassium your field needs, and how to split the doses.</p>
+    </div>
+
+    <div class="grid grid-2">
+      <form class="card" id="fertilizer-form" novalidate>
+        <div class="card-title"><h2 style="margin:0" data-i18n="fert_crop_field">Crop and field</h2></div>
+
+        <div class="grid grid-2">
+          <div class="field">
+            <label for="crop" data-i18n="nav_crop">Crop</label>
+            <select id="crop" name="crop" required disabled><option data-i18n="common_loading">Loading…</option></select>
+          </div>
+          <div class="field">
+            <label for="soil_type" data-i18n="fert_soil_type">Soil type</label>
+            <select id="soil_type" name="soil_type" required disabled><option data-i18n="common_loading">Loading…</option></select>
+          </div>
+          <div class="field">
+            <label for="irrigation" data-i18n="fert_irrigation">Irrigation</label>
+            <select id="irrigation" name="irrigation" required disabled><option data-i18n="common_loading">Loading…</option></select>
+          </div>
+          <div class="field">
+            <label for="prev_crop" data-i18n="fert_prev_crop">Previous crop</label>
+            <select id="prev_crop" name="prev_crop" required disabled><option data-i18n="common_loading">Loading…</option></select>
+          </div>
+        </div>
+
+        <div class="card-title" style="margin-top:8px"><h3 style="margin:0" data-i18n="fert_soil_report">Soil test report</h3></div>
+        <p class="hint" style="margin-top:-8px" data-i18n="fert_no_test_hint">If you do not have a test, leave the average
+           values below and treat the result as a rough guide.</p>
+
+        <div class="grid grid-3">
+          <div class="field">
+            <label for="soil_N" data-i18n="fert_n">Nitrogen</label>
+            <input type="number" id="soil_N" name="soil_N" min="0" max="900" step="10" value="250" required />
+            <span class="hint">kg/ha · low &lt;280</span>
+          </div>
+          <div class="field">
+            <label for="soil_P" data-i18n="fert_p">Phosphorus</label>
+            <input type="number" id="soil_P" name="soil_P" min="0" max="45" step="0.5" value="10" required />
+            <span class="hint">kg/ha · low &lt;11</span>
+          </div>
+          <div class="field">
+            <label for="soil_K" data-i18n="fert_k">Potassium</label>
+            <input type="number" id="soil_K" name="soil_K" min="0" max="500" step="10" value="150" required />
+            <span class="hint">kg/ha · low &lt;110</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="soil_pH" data-i18n="crop_ph">Soil pH</label>
+          <div class="range-row">
+            <input type="range" id="soil_pH" name="soil_pH" min="4" max="9" step="0.1" value="6.5" />
+            <output>6.5</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="organic_matter" data-i18n="fert_organic_matter">Organic matter</label>
+          <div class="range-row">
+            <input type="range" id="organic_matter" name="organic_matter" min="0.1" max="3"
+                   step="0.1" value="0.8" data-suffix=" %" />
+            <output>0.8 %</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="target_yield" data-i18n="fert_expected_yield">Expected yield</label>
+          <!-- step must divide (value - min) or the browser rejects the default:
+               with min=0.1 a step of 0.5 makes 3 invalid. -->
+          <input type="number" id="target_yield" name="target_yield" min="0.1" max="100"
+                 step="0.1" value="3" required />
+          <span class="hint" data-i18n="fert_tonnes_per_ha">tonnes per hectare</span>
+        </div>
+
+        <button class="btn btn-block" id="submit" type="submit" disabled data-i18n="fert_submit">Get fertilizer plan</button>
+      </form>
+
+      <div id="result"></div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, ensureSession } from '/js/api.js';
+    import { renderShell, initRanges, readForm, withBusy, fillSelect, showError, showEmpty, escapeHtml, t, tc } from '/js/ui.js';
+    import { mountChatWidget } from '/js/widget.js';
+
+    await renderShell('fertilizer');
+    mountChatWidget();
+    initRanges();
+
+    const form = document.getElementById('fertilizer-form');
+    const button = document.getElementById('submit');
+    const result = document.getElementById('result');
+
+    showEmpty(result, t('fert_empty_title'),
+      t('fert_empty_body'), '🧪');
+
+    // Dropdowns come from the trained label encoders, so the UI can never
+    // offer a value the model has not seen.
+    (async () => {
+      try {
+        const options = await api.mlOptions('fertilizer');
+        fillSelect(document.getElementById('crop'), options.crop, 'wheat');
+        fillSelect(document.getElementById('soil_type'), options.soil_type, 'loamy');
+        fillSelect(document.getElementById('irrigation'), options.irrigation, 'irrigated');
+        fillSelect(document.getElementById('prev_crop'), options.prev_crop, 'cereal');
+        button.disabled = false;
+      } catch (error) {
+        showError(result, error);
+        form.querySelectorAll('select').forEach((s) => { s.innerHTML = '<option data-i18n="common_unavailable">Unavailable</option>'; });
+      }
+    })();
+
+    // The API returns these as a stable English enum; map to a colour and
+    // a localised label rather than printing the raw value.
+    const SOIL_STATUS = {
+      Low:    ['pill-error', 'fert_low'],
+      Medium: ['pill-warn',  'fert_medium'],
+      High:   ['pill-ok',    'fert_high'],
+    };
+
+    function render(data) {
+      const max = Math.max(data.n_dose_kg_ha, data.p_dose_kg_ha, data.k_dose_kg_ha, 1);
+      const nutrient = (name, label, dose) => `
+        <div class="bar-row">
+          <div class="bar-head"><span>${label}</span><span>${dose.toFixed(0)} kg/ha</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${(dose / max * 100).toFixed(1)}%"></div></div>
+        </div>`;
+
+      result.innerHTML = `
+        <div class="result-card">
+          <div class="result-label" data-i18n="fert_recommended">Recommended fertilizer</div>
+          <div class="result-value">${escapeHtml(data.fertilizer)}</div>
+          <div class="metric-row">
+            <div class="metric-box"><div class="metric-val">${data.urea_kg_ha}</div>
+              <div class="metric-lbl">Urea kg/ha</div></div>
+            <div class="metric-box"><div class="metric-val">${data.dap_kg_ha}</div>
+              <div class="metric-lbl">DAP kg/ha</div></div>
+            <div class="metric-box"><div class="metric-val">${data.mop_kg_ha}</div>
+              <div class="metric-lbl">MOP kg/ha</div></div>
+          </div>
+          <div class="tip-box">💡 ${escapeHtml(tc(data.tip))}</div>
+        </div>
+
+        <section class="card" style="margin-top:16px">
+          <div class="card-title"><h3 style="margin:0" data-i18n="fert_doses">Nutrient doses</h3></div>
+          ${nutrient('N', t('crop_nitrogen'), data.n_dose_kg_ha)}
+          ${nutrient('P', 'Phosphorus (P₂O₅)', data.p_dose_kg_ha)}
+          ${nutrient('K', 'Potassium (K₂O)', data.k_dose_kg_ha)}
+          <div class="row" style="margin-top:12px">
+            <span class="hint" data-i18n="fert_your_soil">Your soil:</span>
+            ${Object.entries(data.soil_status).map(([k, v]) =>
+              `<span class="pill ${(SOIL_STATUS[v] || [])[0] || ''}">${k} — ${
+                escapeHtml(SOIL_STATUS[v] ? t(SOIL_STATUS[v][1]) : v)}</span>`).join('')}
+          </div>
+        </section>
+
+        <section class="card" style="margin-top:16px">
+          <div class="card-title"><h3 style="margin:0" data-i18n="fert_when_apply">When to apply</h3></div>
+          <ul class="step-list">
+            ${data.schedule.map((s) => `<li><div>
+              <div class="step-title">${escapeHtml(tc(s.stage))}</div>
+              <div class="step-desc">${escapeHtml(tc(s.action))}</div>
+            </div></li>`).join('')}
+          </ul>
+          <p class="hint" style="margin-top:12px" data-i18n="fert_icar_note">Doses follow ICAR guidance.
+             DAP = Di-Ammonium Phosphate · MOP = Muriate of Potash · DAP (days) = days after planting.</p>
+        </section>`;
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const payload = readForm(form);
+      if (!payload) return;
+
+      withBusy(button, t('fert_calculating'), async () => {
+        result.innerHTML = '<div class="card"><div class="skeleton" style="height:160px"></div></div>';
+        try {
+          await ensureSession();
+          render(await api.predict('fertilizer', payload));
+        } catch (error) {
+          showError(result, error);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

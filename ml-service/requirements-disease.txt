@@ -1,0 +1,11 @@
+# Extra dependency for the plant-disease endpoint only.
+#
+# TensorFlow is ~600 MB installed and nothing else in the service needs it, so
+# it is kept out of requirements.txt. Install this file only when you have the
+# trained weights - see docs/plant-disease-model.md.
+#
+# 2.20 is the version verified against this project on Python 3.13. The model
+# was trained on 2.18, which has no 3.13 wheel; Keras 3 reads the legacy .h5
+# either way.
+-r requirements.txt
+tensorflow==2.20.0

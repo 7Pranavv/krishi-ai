@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Profile — Krishi.AI</title>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main">
+    <div class="page-head">
+      <h1 data-i18n="profile_heading">Profile and Settings</h1>
+      <p data-i18n="profile_intro">Your details, your saved results, and your account.</p>
+    </div>
+
+    <div class="grid grid-2">
+      <section class="card">
+        <div class="card-title"><h2 style="margin:0" data-i18n="profile_your_details">Your details</h2><span id="account-pill"></span></div>
+        <form id="profile-form" novalidate>
+          <div class="field">
+            <label for="full_name" data-i18n="profile_name">Your name</label>
+            <input type="text" id="full_name" name="full_name" maxlength="120"
+                   placeholder="e.g. Ramesh Kumar" data-i18n-placeholder="profile_name_placeholder" data-i18n-placeholder="profile_name_placeholder" />
+          </div>
+          <div class="field">
+            <label for="pincode" data-i18n="profile_pincode">Pincode</label>
+            <input type="text" id="pincode" name="pincode" inputmode="numeric"
+                   pattern="\d{6}" maxlength="6" placeholder="6 digits" data-i18n-placeholder="profile_pincode_placeholder" data-i18n-placeholder="profile_pincode_placeholder" />
+            <span class="hint" data-i18n="pincode_prompt">Enter your pincode for location-based assistance</span>
+          </div>
+          <div class="field">
+            <label for="language" data-i18n="profile_preferred_language">Preferred language</label>
+            <select id="language" name="language"></select>
+          </div>
+          <button class="btn" id="save-profile" type="submit" data-i18n="profile_save">Save details</button>
+          <div id="profile-message" style="margin-top:12px"></div>
+        </form>
+      </section>
+
+      <section class="card" id="account-card">
+        <div class="card-title"><h2 style="margin:0" data-i18n="profile_account">Account</h2></div>
+        <div id="account-body"></div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:32px">
+      <div class="card-title">
+        <h2 style="margin:0" data-i18n="profile_saved_results">Saved results</h2>
+        <span class="spacer"></span>
+        <label class="sr-only" for="tool-filter" data-i18n="profile_filter_tool">Filter by tool</label>
+        <select id="tool-filter" style="width:auto">
+          <option value="" data-i18n="profile_all_tools">All tools</option>
+          <option value="crop" data-i18n="nav_crop">Crop</option>
+          <option value="disease" data-i18n="nav_disease">Disease</option>
+          <option value="fertilizer" data-i18n="nav_fertilizer">Fertilizer</option>
+          <option value="water" data-i18n="nav_water">Water</option>
+          <option value="rainfall" data-i18n="nav_rainfall">Rainfall</option>
+        </select>
+      </div>
+      <div id="history"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api, auth, ensureSession } from '/js/api.js';
+    import { renderShell, escapeHtml, formatDate, showError, showEmpty,
+             withBusy, TOOLS , t } from '/js/ui.js';
+    import { mountChatWidget } from '/js/widget.js';
+    import { LANGUAGES, setLanguage } from '/js/i18n.js';
+
+    await renderShell('profile');
+    mountChatWidget();
+
+    const TOOL_NAMES = Object.fromEntries(TOOLS.map((t) => [t.id, t.title]));
+    const profileForm = document.getElementById('profile-form');
+    const profileMessage = document.getElementById('profile-message');
+    const accountBody = document.getElementById('account-body');
+    const accountPill = document.getElementById('account-pill');
+    const history = document.getElementById('history');
+    const toolFilter = document.getElementById('tool-filter');
+
+    document.getElementById('language').innerHTML = LANGUAGES
+      .map((l) => `<option value="${l.code}">${l.native} — ${l.english}</option>`).join('');
+
+    function fillProfile(user) {
+      document.getElementById('full_name').value = user.full_name || '';
+      document.getElementById('pincode').value = user.pincode || '';
+      document.getElementById('language').value = user.language || 'en';
+      accountPill.innerHTML = user.is_guest
+        ? '<span class="pill pill-warn" data-i18n="profile_guest">Guest</span>'
+        : `<span class="pill pill-ok">${escapeHtml(user.username)}</span>`;
+      renderAccount(user);
+    }
+
+    /* Guests see a create-account form; registered users see sign-out. */
+    function renderAccount(user) {
+      if (!user.is_guest) {
+        accountBody.innerHTML = `
+          <p>${escapeHtml(t('profile_signed_in_as'))} <strong>${escapeHtml(user.username)}</strong>.
+             ${escapeHtml(t('profile_follows_devices'))}</p>
+          <p class="hint">${escapeHtml(t('profile_joined'))} ${escapeHtml(formatDate(user.created_at))}</p>
+          <button class="btn btn-secondary" id="sign-out" type="button" data-i18n="profile_signout">Sign out</button>`;
+        document.getElementById('sign-out').addEventListener('click', () => {
+          auth.clear();
+          location.reload();
+        });
+        return;
+      }
+
+      accountBody.innerHTML = `
+        <p data-i18n="profile_guest_body">You are using Krishi.AI as a guest on this device. Create a free account to
+           keep your chats and results, and reach them from your phone too.</p>
+        <form id="register-form" novalidate>
+          <div class="field">
+            <label for="reg-username" data-i18n="profile_choose_username">Choose a username</label>
+            <input type="text" id="reg-username" name="username" required minlength="3"
+                   maxlength="64" pattern="[a-zA-Z0-9_.\\-]{3,64}" autocomplete="username" />
+            <span class="hint" data-i18n="profile_username_hint">Letters, numbers, dot, dash or underscore</span>
+          </div>
+          <div class="field">
+            <label for="reg-password" data-i18n="profile_choose_password">Choose a password</label>
+            <input type="password" id="reg-password" name="password" required minlength="8"
+                   maxlength="72" autocomplete="new-password" />
+            <span class="hint" data-i18n="profile_password_hint">At least 8 characters</span>
+          </div>
+          <button class="btn" id="do-register" type="submit" data-i18n="profile_create">Create account</button>
+          <button class="btn btn-quiet" id="show-login" type="button" data-i18n="profile_have_account">I already have one</button>
+          <div id="account-message" style="margin-top:12px"></div>
+        </form>`;
+      wireRegister();
+    }
+
+    function renderLogin() {
+      accountBody.innerHTML = `
+        <form id="login-form" novalidate>
+          <div class="field">
+            <label for="login-username" data-i18n="profile_username">Username</label>
+            <input type="text" id="login-username" name="username" required maxlength="64"
+                   autocomplete="username" />
+          </div>
+          <div class="field">
+            <label for="login-password" data-i18n="profile_password">Password</label>
+            <input type="password" id="login-password" name="password" required maxlength="72"
+                   autocomplete="current-password" />
+          </div>
+          <button class="btn" id="do-login" type="submit" data-i18n="profile_signin">Sign in</button>
+          <button class="btn btn-quiet" id="show-register" type="button" data-i18n="profile_create_instead">Create an account instead</button>
+          <div id="account-message" style="margin-top:12px"></div>
+        </form>`;
+      const form = document.getElementById('login-form');
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        submitAuth(document.getElementById('do-login'), t('profile_signing_in'), () =>
+          api.login({
+            username: document.getElementById('login-username').value.trim(),
+            password: document.getElementById('login-password').value,
+          }));
+      });
+      document.getElementById('show-register').addEventListener('click', () =>
+        renderAccount(auth.user || { is_guest: true }));
+    }
+
+    function wireRegister() {
+      const form = document.getElementById('register-form');
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        submitAuth(document.getElementById('do-register'), t('profile_creating'), () =>
+          api.register({
+            username: document.getElementById('reg-username').value.trim(),
+            password: document.getElementById('reg-password').value,
+            full_name: document.getElementById('full_name').value.trim() || null,
+          }));
+      });
+      document.getElementById('show-login').addEventListener('click', renderLogin);
+    }
+
+    function submitAuth(button, label, action) {
+      withBusy(button, label, async () => {
+        const message = document.getElementById('account-message');
+        message.innerHTML = '';
+        try {
+          const user = auth.save(await action());
+          fillProfile(user);
+          await loadHistory();
+        } catch (error) {
+          showError(document.getElementById('account-message') || accountBody, error);
+        }
+      });
+    }
+
+    profileForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!profileForm.reportValidity()) return;
+      const payload = {
+        full_name: document.getElementById('full_name').value.trim() || null,
+        pincode: document.getElementById('pincode').value.trim() || null,
+        language: document.getElementById('language').value,
+      };
+      withBusy(document.getElementById('save-profile'), 'Saving...', async () => {
+        profileMessage.innerHTML = '';
+        try {
+          const user = await api.updateProfile(payload);
+          auth.setUser(user);
+          setLanguage(user.language);
+          profileMessage.innerHTML =
+            '<div class="alert alert-success" role="status"><span aria-hidden="true">✅</span>' +
+            '<div><strong data-i18n="common_saved">Saved.</strong></div></div>';
+        } catch (error) {
+          showError(profileMessage, error);
+        }
+      });
+    });
+
+    async function loadHistory() {
+      history.innerHTML = '<div class="skeleton" style="height:80px"></div>';
+      try {
+        const rows = await api.predictions(toolFilter.value || undefined);
+        if (!rows.length) {
+          showEmpty(history, t('profile_no_results_title'),
+            t('profile_no_results_body'), '📋');
+          return;
+        }
+        history.innerHTML = `<div class="table-scroll"><table class="data-table">
+          <thead><tr><th data-i18n="profile_col_tool">Tool</th><th data-i18n="profile_col_result">Result</th><th data-i18n="profile_col_when">When</th></tr></thead>
+          <tbody>${rows.map((r) => `<tr>
+            <td><span class="pill pill-info">${escapeHtml(TOOL_NAMES[r.tool] || r.tool)}</span></td>
+            <td>${escapeHtml(r.summary)}</td>
+            <td style="white-space:nowrap;color:var(--text-muted)">${escapeHtml(formatDate(r.created_at))}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+      } catch (error) {
+        showError(history, error);
+      }
+    }
+    toolFilter.addEventListener('change', loadHistory);
+
+    (async () => {
+      try {
+        await ensureSession();
+        fillProfile(await api.me());
+        await loadHistory();
+      } catch (error) {
+        showError(accountBody, error);
+        showError(history, error);
+      }
+    })();
+  </script>
+</body>
+</html>
